@@ -1,7 +1,7 @@
 """
 ربات مسدودکننده پیام‌های خصوصی
-نوشته شده با Telethon - مخصوص Render.com
-سازگار با پایتون 3.11
+سازگار با پایتون ۳.۱۴ و بالاتر
+استاندارد جدید asyncio
 """
 
 from telethon import TelegramClient, events
@@ -10,7 +10,7 @@ import asyncio
 from datetime import datetime
 import os
 
-# =============== دریافت اطلاعات از Environment Variables ===============
+# =============== دریافت اطلاعات ===============
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 PHONE = os.environ.get('PHONE', '')
@@ -39,9 +39,6 @@ BAN_DELETE = 20
 violations = {}
 banned = set()
 welcomed = set()
-
-# =============== ساخت کلاینت ===============
-client = TelegramClient('pm_blocker_session', API_ID, API_HASH)
 
 # =============== پیام خوش‌آمدگویی ===============
 WELCOME_EPIC = """
@@ -133,7 +130,6 @@ BAN_EPIC = """
 🔗 [ربات پشتیبانی](https://t.me/{support_bot_raw})
 """
 
-@client.on(events.NewMessage)
 async def handler(event):
     """هندلر اصلی پیام‌ها"""
     if not event.is_private:
@@ -232,10 +228,10 @@ async def handler(event):
             # بن کردن کاربر بعد از ۵ اخطار
             if count >= MAX_VIOLATIONS:
                 try:
-                    await client(BlockRequest(id=user_id))
+                    await event.client(BlockRequest(id=user_id))
                     banned.add(user_id)
                     
-                    ban_msg = await client.send_message(
+                    ban_msg = await event.client.send_message(
                         user_id,
                         BAN_EPIC.format(
                             name=sender.first_name or 'کاربر',
@@ -259,23 +255,29 @@ async def handler(event):
                 except:
                     pass
     
-    except Exception as e:
+    except Exception:
         # خطاها رو نادیده بگیر
         pass
 
 async def main():
-    """تابع اصلی اجرای ربات"""
+    """تابع اصلی با مدیریت درست event loop"""
     print("🚀 ربات در حال راه‌اندازی...")
     
-    # شروع کلاینت
-    await client.start(phone=PHONE)
-    print("✅ ربات با موفقیت روشن شد! منتظر پیام‌ها...")
-    
-    # اجرای تا بی‌نهایت
-    await client.run_until_disconnected()
+    # استفاده از async with برای مدیریت خودکار client
+    async with TelegramClient('pm_blocker_session', API_ID, API_HASH) as client:
+        # ثبت هندلر
+        client.add_event_handler(handler, events.NewMessage)
+        
+        # شروع با شماره تلفن
+        await client.start(phone=PHONE)
+        print("✅ ربات با موفقیت روشن شد! منتظر پیام‌ها...")
+        
+        # اجرای تا بی‌نهایت
+        await client.run_until_disconnected()
 
 if __name__ == "__main__":
     try:
+        # asyncio.run خودش event loop رو مدیریت می‌کنه
         asyncio.run(main())
     except KeyboardInterrupt:
         print("👋 ربات خاموش شد")
