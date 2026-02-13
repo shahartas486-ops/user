@@ -1,11 +1,16 @@
+"""
+ربات مسدودکننده پیام‌های خصوصی
+نوشته شده با Telethon - مخصوص Render.com
+سازگار با پایتون 3.11
+"""
+
 from telethon import TelegramClient, events
 from telethon.tl.functions.contacts import BlockRequest
 import asyncio
 from datetime import datetime
 import os
-import asyncio
 
-# =============== دریافت اطلاعات ===============
+# =============== دریافت اطلاعات از Environment Variables ===============
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 PHONE = os.environ.get('PHONE', '')
@@ -25,20 +30,20 @@ if WHITELIST_IDS:
             pass
 
 # =============== تنظیمات ===============
-MAX_VIOLATIONS = 15
+MAX_VIOLATIONS = 5
 WELCOME_DELETE = 35
 WARNING_DELETE = 25
 BAN_DELETE = 20
 
-# =============== دیتابیس ===============
+# =============== دیتابیس در حافظه ===============
 violations = {}
 banned = set()
 welcomed = set()
 
-# ساخت کلاینت - بدون String Session
+# =============== ساخت کلاینت ===============
 client = TelegramClient('pm_blocker_session', API_ID, API_HASH)
 
-# =============== پیام‌ها ===============
+# =============== پیام خوش‌آمدگویی ===============
 WELCOME_EPIC = """
 🚫 **دسترسی غیرمجاز | Unauthorized Access** 🚫
 
@@ -53,7 +58,7 @@ WELCOME_EPIC = """
 
 🤖 **راه ارتباطی رسمی:**
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
-🌟 **ربات پشتیبانی:** {support_bot}
+🌟 **ربات پشتیبانی:** `{support_bot}`
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 
 📋 **راهنمای ارتباط:**
@@ -70,6 +75,7 @@ WELCOME_EPIC = """
 🔗 [ربات پشتیبانی](https://t.me/{support_bot_raw})
 """
 
+# =============== پیام هشدار ===============
 WARNING_EPIC = """
 ⛔ **اخطار امنیتی | Security Warning** ⛔
 
@@ -86,7 +92,7 @@ WARNING_EPIC = """
 ❌ **پیام شما حذف گردید!**
 
 🤖 **مسیر صحیح:**
-👉 **{support_bot}** 👈
+👉 **`{support_bot}`** 👈
 
 📊 **تخلفات شما:**
 
@@ -101,6 +107,7 @@ WARNING_EPIC = """
 🔗 [ربات پشتیبانی](https://t.me/{support_bot_raw})
 """
 
+# =============== پیام مسدودیت ===============
 BAN_EPIC = """
 🔴 **مسدودیت دائمی | Permanent Ban** 🔴
 
@@ -117,7 +124,7 @@ BAN_EPIC = """
 ❌ **دسترسی شما قطع شد!**
 
 🤖 **تنها راه ارتباطی:**
-👉 **{support_bot}** 👈
+👉 **`{support_bot}`** 👈
 
 ⚠️ این تصمیم **قطعی و غیرقابل بازگشت** است
 
@@ -128,6 +135,7 @@ BAN_EPIC = """
 
 @client.on(events.NewMessage)
 async def handler(event):
+    """هندلر اصلی پیام‌ها"""
     if not event.is_private:
         return
     
@@ -135,19 +143,23 @@ async def handler(event):
         sender = await event.get_sender()
         user_id = sender.id
         
+        # چک لیست سفید
         if user_id in WHITELIST:
             return
         
+        # چک بن بودن
         if user_id in banned:
             await event.delete()
             return
         
+        # چک ربات پشتیبانی
         if sender.bot:
             if user_id == SUPPORT_BOT_ID:
                 return
             if sender.username and SUPPORT_BOT_USERNAME[1:].lower() in sender.username.lower():
                 return
         
+        # ارسال پیام خوش‌آمدگویی برای اولین پیام
         if user_id not in welcomed and not sender.bot:
             welcomed.add(user_id)
             
@@ -170,14 +182,17 @@ async def handler(event):
             except:
                 pass
         
+        # حذف پیام کاربر
         await event.delete()
         
+        # مدیریت اخطارها برای کاربران عادی
         if not sender.bot:
             violations[user_id] = violations.get(user_id, 0) + 1
             count = violations[user_id]
             remaining = MAX_VIOLATIONS - count
             risk = min(100, int((count / MAX_VIOLATIONS) * 100))
             
+            # پیام متناسب با تعداد اخطار
             if count == 1:
                 message_advice = "این اولین فرصت شماست!"
             elif count == 2:
@@ -189,6 +204,7 @@ async def handler(event):
             else:
                 message_advice = "اخطار نهایی! این آخرین شانس شماست."
             
+            # ارسال پیام هشدار
             warn_msg = await event.reply(
                 WARNING_EPIC.format(
                     count=count,
@@ -213,6 +229,7 @@ async def handler(event):
             except:
                 pass
             
+            # بن کردن کاربر بعد از ۵ اخطار
             if count >= MAX_VIOLATIONS:
                 try:
                     await client(BlockRequest(id=user_id))
@@ -242,24 +259,25 @@ async def handler(event):
                 except:
                     pass
     
-    except:
+    except Exception as e:
+        # خطاها رو نادیده بگیر
         pass
 
 async def main():
-    """اجرای ربات"""
-    try:
-        print("🚀 در حال اتصال به تلگرام...")
-        
-        # لاگین با شماره تلفن
-        await client.start(phone=PHONE)
-        
-        print("✅ ربات با موفقیت روشن شد! در انتظار پیام‌ها...")
-        await client.run_until_disconnected()
-    except Exception as e:
-        print(f"❌ خطا: {e}")
+    """تابع اصلی اجرای ربات"""
+    print("🚀 ربات در حال راه‌اندازی...")
+    
+    # شروع کلاینت
+    await client.start(phone=PHONE)
+    print("✅ ربات با موفقیت روشن شد! منتظر پیام‌ها...")
+    
+    # اجرای تا بی‌نهایت
+    await client.run_until_disconnected()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("👋 ربات خاموش شد")
+    except Exception as e:
+        print(f"❌ خطا: {e}")
