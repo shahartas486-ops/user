@@ -1,7 +1,6 @@
 """
 ربات مسدودکننده پیام‌های خصوصی
-سازگار با پایتون ۳.۱۴ و بالاتر
-استاندارد جدید asyncio
+نسخه نهایی با Web Server برای Render (رایگان)
 """
 
 from telethon import TelegramClient, events
@@ -9,6 +8,59 @@ from telethon.tl.functions.contacts import BlockRequest
 import asyncio
 from datetime import datetime
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import socket
+
+# =============== وب سرور برای راضی کردن Render ===============
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.end_headers()
+        
+        # یه صفحه ساده برای نمایش وضعیت
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>ربات تلگرام</title>
+            <style>
+                body {{ font-family: Arial, text-align: center; padding: 50px; background: #1a1a1a; color: white; }}
+                .status {{ color: #00ff00; font-size: 24px; }}
+                .info {{ color: #888; margin-top: 20px; }}
+            </style>
+        </head>
+        <body>
+            <h1>🤖 ربات مسدودکننده پیام‌های خصوصی</h1>
+            <div class="status">✅ ربات فعال است</div>
+            <div class="info">زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+        </body>
+        </html>
+        """
+        self.wfile.write(html.encode('utf-8'))
+    
+    def log_message(self, format, *args):
+        pass  # لاگ نکن که شلوغ نشه
+
+def run_health_server():
+    """اجرای وب سرور روی پورت ۱۰۰۰۰"""
+    port = int(os.environ.get('PORT', 10000))
+    
+    # چند بار تلاش برای بایند کردن پورت
+    for attempt in range(5):
+        try:
+            server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+            print(f"🌐 Web server running on port {port}")
+            server.serve_forever()
+            break
+        except OSError as e:
+            if "Address already in use" in str(e):
+                print(f"⚠️ Port {port} is busy, retrying in 5 seconds...")
+                time.sleep(5)
+            else:
+                print(f"❌ Web server error: {e}")
+                break
 
 # =============== دریافت اطلاعات ===============
 API_ID = int(os.environ.get('API_ID', 0))
@@ -39,6 +91,9 @@ BAN_DELETE = 20
 violations = {}
 banned = set()
 welcomed = set()
+
+# =============== ساخت کلاینت ===============
+client = TelegramClient('pm_blocker_session', API_ID, API_HASH)
 
 # =============== پیام خوش‌آمدگویی ===============
 WELCOME_EPIC = """
@@ -130,6 +185,7 @@ BAN_EPIC = """
 🔗 [ربات پشتیبانی](https://t.me/{support_bot_raw})
 """
 
+@client.on(events.NewMessage)
 async def handler(event):
     """هندلر اصلی پیام‌ها"""
     if not event.is_private:
@@ -228,10 +284,10 @@ async def handler(event):
             # بن کردن کاربر بعد از ۵ اخطار
             if count >= MAX_VIOLATIONS:
                 try:
-                    await event.client(BlockRequest(id=user_id))
+                    await client(BlockRequest(id=user_id))
                     banned.add(user_id)
                     
-                    ban_msg = await event.client.send_message(
+                    ban_msg = await client.send_message(
                         user_id,
                         BAN_EPIC.format(
                             name=sender.first_name or 'کاربر',
@@ -260,24 +316,24 @@ async def handler(event):
         pass
 
 async def main():
-    """تابع اصلی با مدیریت درست event loop"""
+    """تابع اصلی اجرای ربات"""
     print("🚀 ربات در حال راه‌اندازی...")
     
-    # استفاده از async with برای مدیریت خودکار client
-    async with TelegramClient('pm_blocker_session', API_ID, API_HASH) as client:
-        # ثبت هندلر
-        client.add_event_handler(handler, events.NewMessage)
-        
-        # شروع با شماره تلفن
-        await client.start(phone=PHONE)
-        print("✅ ربات با موفقیت روشن شد! منتظر پیام‌ها...")
-        
-        # اجرای تا بی‌نهایت
-        await client.run_until_disconnected()
+    # شروع کلاینت
+    await client.start(phone=PHONE)
+    print("✅ ربات با موفقیت روشن شد! منتظر پیام‌ها...")
+    
+    # اجرای تا بی‌نهایت
+    await client.run_until_disconnected()
 
 if __name__ == "__main__":
+    import time
+    
+    # اجرای وب سرور در یک نخ جداگانه
+    web_thread = threading.Thread(target=run_health_server, daemon=True)
+    web_thread.start()
+    
     try:
-        # asyncio.run خودش event loop رو مدیریت می‌کنه
         asyncio.run(main())
     except KeyboardInterrupt:
         print("👋 ربات خاموش شد")
