@@ -11,8 +11,6 @@ services:
         sync: false
       - key: PHONE
         sync: false
-      - key: SESSION_STRING
-        sync: false
       - key: SUPPORT_BOT_TOKEN
         sync: false
       - key: SUPPORT_BOT_USERNAME
