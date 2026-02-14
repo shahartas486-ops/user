@@ -1,7 +1,4 @@
-"""
-ربات مسدودکننده پیام‌های خصوصی
-نسخه نهایی - کاملاً async - سازگار با پایتون ۳.۱۴
-"""
+
 
 from telethon import TelegramClient, events
 from telethon.tl.functions.contacts import BlockRequest
@@ -10,29 +7,43 @@ from datetime import datetime
 import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import requests
+import time
 
-# =============== وب سرور برای راضی کردن Render ===============
+# ===============  Render ===============
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
         
+        # نمایش وضعیت ربات
+        status = "✅ فعال" if 'client' in globals() else "🔄 در حال راه‌اندازی"
+        
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <title>ربات تلگرام</title>
+            <meta http-equiv="refresh" content="30">
             <style>
                 body {{ font-family: Arial, text-align: center; padding: 50px; background: #1a1a1a; color: white; }}
                 .status {{ color: #00ff00; font-size: 24px; }}
                 .info {{ color: #888; margin-top: 20px; }}
+                .stats {{ margin-top: 30px; text-align: left; display: inline-block; background: #333; padding: 20px; border-radius: 10px; }}
             </style>
         </head>
         <body>
             <h1>🤖 ربات مسدودکننده پیام‌های خصوصی</h1>
-            <div class="status">✅ ربات فعال است</div>
+            <div class="status">{status}</div>
             <div class="info">زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+            <div class="stats">
+                <h3>آمار:</h3>
+                <p>🚫 کاربران بن شده: {len(banned)}</p>
+                <p>⚠️ کاربران دارای اخطار: {len(violations)}</p>
+                <p>👋 خوش‌آمدگویی: {len(welcomed)}</p>
+                <p>⏰ آخرین فعالیت: {last_activity}</p>
+            </div>
         </body>
         </html>
         """
@@ -51,6 +62,21 @@ def run_health_server():
     except Exception as e:
         print(f"❌ Web server error: {e}")
 
+# =============== تابع Keep Alive ===============
+def keep_alive():
+    """هر ۵ دقیقه به خودش پینگ می‌زنه تا نخوابه"""
+    url = f"https://{os.environ.get('RENDER_SERVICE_NAME', 'localhost')}.onrender.com"
+    if url == "https://.onrender.com":
+        url = "https://user-11.onrender.com"  # آدرس خودت رو بذار
+    
+    while True:
+        try:
+            response = requests.get(url, timeout=10)
+            print(f"💓 Keep-alive ping sent at {datetime.now().strftime('%H:%M:%S')} - Status: {response.status_code}")
+        except Exception as e:
+            print(f"⚠️ Keep-alive error: {e}")
+        time.sleep(300)  # ۵ دقیقه
+
 # =============== دریافت اطلاعات ===============
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
@@ -61,7 +87,9 @@ WHITELIST_IDS = os.environ.get('WHITELIST_IDS', '')
 
 # =============== پردازش لیست سفید ===============
 SUPPORT_BOT_ID = int(SUPPORT_BOT_TOKEN.split(':')[0]) if ':' in SUPPORT_BOT_TOKEN else 0
-WHITELIST = [777000, SUPPORT_BOT_ID]
+
+# لیست سفید اصلی + آیدی جدید 1718269955
+WHITELIST = [777000, SUPPORT_BOT_ID, 1718269955]
 
 if WHITELIST_IDS:
     for wid in WHITELIST_IDS.split(','):
@@ -70,8 +98,13 @@ if WHITELIST_IDS:
         except:
             pass
 
+# حذف مقادیر تکراری
+WHITELIST = list(set(WHITELIST))
+
+print(f"🟢 لیست سفید: {WHITELIST}")
+
 # =============== تنظیمات ===============
-MAX_VIOLATIONS = 5
+MAX_VIOLATIONS = 15
 WELCOME_DELETE = 35
 WARNING_DELETE = 25
 BAN_DELETE = 20
@@ -80,6 +113,7 @@ BAN_DELETE = 20
 violations = {}
 banned = set()
 welcomed = set()
+last_activity = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 # =============== پیام‌ها ===============
 WELCOME_EPIC = """
@@ -96,7 +130,7 @@ WELCOME_EPIC = """
 
 🤖 **راه ارتباطی رسمی:**
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
-🌟 **ربات پشتیبانی:** `{support_bot}`
+🌟 **ربات پشتیبانی:** {support_bot}
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 
 📋 **راهنمای ارتباط:**
@@ -129,7 +163,7 @@ WARNING_EPIC = """
 ❌ **پیام شما حذف گردید!**
 
 🤖 **مسیر صحیح:**
-👉 **`{support_bot}`** 👈
+👉 **{support_bot}** 👈
 
 📊 **تخلفات شما:**
 
@@ -171,6 +205,8 @@ BAN_EPIC = """
 
 async def main():
     """تابع اصلی - همه چی داخل async"""
+    global last_activity
+    
     print("🚀 ربات در حال راه‌اندازی...")
     
     # ساخت کلاینت داخل تابع async
@@ -179,6 +215,9 @@ async def main():
     @client.on(events.NewMessage)
     async def handler(event):
         """هندلر اصلی پیام‌ها"""
+        global last_activity
+        last_activity = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         if not event.is_private:
             return
         
@@ -186,7 +225,9 @@ async def main():
             sender = await event.get_sender()
             user_id = sender.id
             
+            # چک کردن لیست سفید
             if user_id in WHITELIST:
+                print(f"🟢 کاربر لیست سفید: {user_id}")
                 return
             
             if user_id in banned:
@@ -299,6 +340,7 @@ async def main():
     # شروع کلاینت
     await client.start(phone=PHONE)
     print("✅ ربات با موفقیت روشن شد! منتظر پیام‌ها...")
+    print(f"🟢 لیست سفید نهایی: {WHITELIST}")
     
     # اجرای تا بی‌نهایت
     await client.run_until_disconnected()
@@ -307,6 +349,10 @@ if __name__ == "__main__":
     # اجرای وب سرور در یک نخ جداگانه
     web_thread = threading.Thread(target=run_health_server, daemon=True)
     web_thread.start()
+    
+    # اجرای Keep Alive در یک نخ جداگانه
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
     
     try:
         # اجرای تابع اصلی با asyncio.run
